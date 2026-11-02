@@ -1,0 +1,375 @@
+
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>幾A幾B｜版本四個人雲端版</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;padding:25px 15px;min-height:100vh;
+ font-family:Arial,"Noto Sans TC",sans-serif;
+ color:#493e60;
+ background:linear-gradient(135deg,#f5eaff,#fff0f4,#e9f8f1);
+}
+main{max-width:760px;margin:auto}
+header{text-align:center;margin:20px 0 25px}
+header h1{font-size:36px;margin:12px 0}
+header p{color:#82758f}
+.card{
+ background:white;border:1px solid #eee4f5;
+ border-radius:20px;padding:23px;margin:17px 0;
+ box-shadow:0 8px 25px #66508012;
+}
+h2{font-size:20px;margin:0 0 15px}
+button{
+ border:0;border-radius:12px;padding:12px 18px;
+ background:#957bc7;color:white;font-size:15px;
+ font-weight:bold;cursor:pointer;margin:4px;
+}
+button.secondary{background:#eee7f7;color:#665282}
+button.pink{background:#f4dce7;color:#81586d}
+button:disabled{opacity:.5;cursor:not-allowed}
+input{
+ padding:12px;border:1px solid #d9cde8;border-radius:12px;
+ font-size:20px;text-align:center;letter-spacing:7px;
+ width:180px;color:#493e60;
+}
+.center{text-align:center}
+.hint{font-size:13px;color:#887d96;line-height:1.7}
+#message{font-weight:bold;min-height:30px;margin:15px}
+.stats{display:flex;justify-content:center;gap:12px;margin:18px}
+.stat{background:#f6f1fb;padding:12px 20px;border-radius:12px}
+.stat b{display:block;font-size:23px;text-align:center}
+.status{font-size:14px;margin-top:12px;line-height:1.6}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:10px 5px;border-bottom:1px solid #eee7f4;text-align:center}
+th{color:#887d96}
+#debugArea{margin:12px;color:#9278c8;font-weight:bold}
+footer{text-align:center;color:#998da4;font-size:12px;padding:20px}
+</style>
+</head>
+<body>
+<main>
+
+<header>
+ <div>🌸 DIGITAL TECHNOLOGY · VERSION 4</div>
+ <h1>🎯 幾A幾B挑戰</h1>
+ <p>猜出四位數字，挑戰你的邏輯與觀察力！</p>
+</header>
+
+<section class="card">
+ <h2>☁️ Google 個人雲端存檔</h2>
+ <p class="hint">登入自己的 Google 帳號，讀取並保存個人遊戲紀錄。</p>
+ <button id="loginBtn">登入並讀取紀錄</button>
+ <button id="saveBtn" class="secondary">手動儲存</button>
+ <div id="cloudStatus" class="status">尚未連接雲端。</div>
+</section>
+
+<section class="card center">
+ <h2>🎮 開始猜數字</h2>
+ <p class="hint">答案是 0～9 組成的四位數字，不可以重複，第一位可以是 0。</p>
+
+ <div class="stats">
+  <div class="stat">本局猜測次數<b id="count">0</b></div>
+  <div class="stat">目前局數<b id="roundNo">1</b></div>
+ </div>
+
+ <input id="guessInput" type="text" maxlength="4"
+        inputmode="numeric" placeholder="0000">
+ <br><br>
+ <button id="guessBtn">送出猜測</button>
+
+ <div id="message">請輸入四個不重複的數字！</div>
+
+ <button id="newBtn" class="pink">開始新的一局</button>
+ <button id="debugBtn" class="secondary">顯示答案（除錯）</button>
+ <div id="debugArea"></div>
+</section>
+
+<section class="card">
+ <h2>📚 遊戲歷史紀錄</h2>
+ <div id="historyArea" class="hint">登入後顯示雲端歷史。</div>
+</section>
+
+<footer>幾A幾B｜版本四 Google 帳號個人雲端存檔</footer>
+</main>
+
+<script>
+const API_URL =
+"https://script.google.com/macros/s/AKfycbxA8vQZVktrTg0rzVOP4jRFTKBwiOtFriwDPyBIGsHN2NyCaN5zQegXSTtS2J-wyarE/exec";
+
+const $ = id => document.getElementById(id);
+
+let gameData = {rounds:[],currentRound:null};
+let answer = "";
+let cloudLoaded = false;
+let debugVisible = false;
+let callbackNumber = 0;
+
+// 產生四位數、不重複的答案
+function makeAnswer(){
+ const digits = "0123456789".split("");
+ for(let i=digits.length-1;i>0;i--){
+  const j=Math.floor(Math.random()*(i+1));
+  [digits[i],digits[j]]=[digits[j],digits[i]];
+ }
+ return digits.slice(0,4).join("");
+}
+
+function makeRound(){
+ return {
+  answer:answer,
+  guesses:[],
+  completed:false,
+  startedAt:new Date().toISOString()
+ };
+}
+
+function ensureRound(){
+ if(!gameData.currentRound){
+  answer=makeAnswer();
+  gameData.currentRound=makeRound();
+ }else{
+  answer=gameData.currentRound.answer;
+ }
+}
+
+function cloudMessage(message,isError=false){
+ $("cloudStatus").textContent=message;
+ $("cloudStatus").style.color=isError?"#c05270":"#56866e";
+}
+
+// 顯示歷史
+function renderHistory(){
+ let rounds=[...(gameData.rounds||[])];
+
+ if(gameData.currentRound){
+  rounds.push(gameData.currentRound);
+ }
+
+ if(rounds.length===0){
+  $("historyArea").textContent="目前沒有遊戲紀錄。";
+  return;
+ }
+
+ let html="<table><tr><th>局數</th><th>猜測次數</th><th>狀態</th><th>最後結果</th></tr>";
+
+ rounds.forEach((r,i)=>{
+  const guesses=r.guesses||[];
+  const last=guesses.length?
+   guesses[guesses.length-1].result:"尚未猜測";
+
+  html+=`<tr>
+   <td>${i+1}</td>
+   <td>${guesses.length}</td>
+   <td>${r.completed?"已完成":"進行中"}</td>
+   <td>${last}</td>
+  </tr>`;
+ });
+
+ html+="</table>";
+ $("historyArea").innerHTML=html;
+}
+
+function render(){
+ ensureRound();
+
+ $("count").textContent=gameData.currentRound.guesses.length;
+ $("roundNo").textContent=gameData.rounds.length+1;
+
+ $("guessInput").disabled=gameData.currentRound.completed;
+ $("guessBtn").disabled=gameData.currentRound.completed;
+
+ renderHistory();
+}
+
+// JSONP 讀取 Apps Script
+function loadFromServer(){
+ return new Promise((resolve,reject)=>{
+  const callback="gameCallback"+(++callbackNumber);
+  const script=document.createElement("script");
+
+  const timer=setTimeout(()=>{
+   delete window[callback];
+   script.remove();
+   reject(new Error("讀取逾時，請重新嘗試。"));
+  },20000);
+
+  window[callback]=(data)=>{
+   clearTimeout(timer);
+   delete window[callback];
+   script.remove();
+   resolve(data);
+  };
+
+  script.onerror=()=>{
+   clearTimeout(timer);
+   delete window[callback];
+   script.remove();
+   reject(new Error("無法連接 Apps Script。"));
+  };
+
+  script.src=API_URL+
+   "?callback="+callback+"&t="+Date.now();
+
+  document.body.appendChild(script);
+ });
+}
+
+// 登入後讀取個人紀錄
+async function loginAndLoad(){
+ cloudMessage("正在讀取 Google 個人紀錄……");
+
+ try{
+  const result=await loadFromServer();
+
+  if(!result.success){
+   throw new Error(result.message||"讀取失敗");
+  }
+
+  gameData=result.data||{
+   rounds:[],
+   currentRound:null
+  };
+
+  if(!Array.isArray(gameData.rounds)){
+   gameData.rounds=[];
+  }
+
+  cloudLoaded=true;
+  ensureRound();
+  render();
+
+  cloudMessage(
+   "成功讀取個人紀錄！帳號："+result.email
+  );
+
+  await saveCloud(false);
+
+ }catch(error){
+  cloudMessage("讀取失敗："+error.message,true);
+ }
+}
+
+// 儲存個人紀錄
+async function saveCloud(showMessage=true){
+ if(!cloudLoaded){
+  if(showMessage){
+   cloudMessage("請先登入並讀取紀錄。",true);
+  }
+  return;
+ }
+
+ try{
+  await fetch(API_URL,{
+   method:"POST",
+   mode:"no-cors",
+   headers:{
+    "Content-Type":"text/plain;charset=utf-8"
+   },
+   body:JSON.stringify({data:gameData})
+  });
+
+  if(showMessage){
+   cloudMessage("已送出儲存要求，請稍後重新讀取確認。");
+  }
+
+ }catch(error){
+  cloudMessage("儲存連線失敗："+error.message,true);
+ }
+}
+
+// 猜測
+function submitGuess(){
+ const value=$("guessInput").value.trim();
+
+ if(!/^[0-9]{4}$/.test(value)){
+  $("message").textContent="請輸入剛好四位數字！";
+  return;
+ }
+
+ if(new Set(value).size!==4){
+  $("message").textContent="四個數字不能重複！";
+  return;
+ }
+
+ let A=0;
+ let B=0;
+
+ for(let i=0;i<4;i++){
+  if(value[i]===answer[i]){
+   A++;
+  }else if(answer.includes(value[i])){
+   B++;
+  }
+ }
+
+ const result=A+"A"+B+"B";
+
+ gameData.currentRound.guesses.push({
+  guess:value,
+  result:result,
+  at:new Date().toISOString()
+ });
+
+ $("message").textContent="結果："+result;
+ $("guessInput").value="";
+
+ if(A===4){
+  gameData.currentRound.completed=true;
+  gameData.currentRound.finishedAt=new Date().toISOString();
+  $("message").textContent="🎉 恭喜答對！本局完成！";
+ }
+
+ render();
+ saveCloud(false);
+}
+
+// 新的一局
+function newRound(){
+ if(gameData.currentRound){
+  gameData.rounds.push(gameData.currentRound);
+ }
+
+ answer=makeAnswer();
+ gameData.currentRound=makeRound();
+
+ debugVisible=false;
+ $("debugArea").textContent="";
+ $("debugBtn").textContent="顯示答案（除錯）";
+ $("message").textContent="新的一局開始了！";
+
+ render();
+ saveCloud(false);
+}
+
+// 除錯模式
+function toggleDebug(){
+ debugVisible=!debugVisible;
+
+ $("debugArea").textContent=
+  debugVisible?"目前答案："+answer:"";
+
+ $("debugBtn").textContent=
+  debugVisible?"隱藏答案（除錯）":"顯示答案（除錯）";
+}
+
+$("loginBtn").addEventListener("click",loginAndLoad);
+$("saveBtn").addEventListener("click",()=>saveCloud(true));
+$("guessBtn").addEventListener("click",submitGuess);
+$("newBtn").addEventListener("click",newRound);
+$("debugBtn").addEventListener("click",toggleDebug);
+
+$("guessInput").addEventListener("keydown",e=>{
+ if(e.key==="Enter")submitGuess();
+});
+
+// 初始遊戲
+answer=makeAnswer();
+gameData.currentRound=makeRound();
+render();
+</script>
+</body>
+</html>
